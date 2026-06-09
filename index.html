@@ -92,7 +92,7 @@
   .status.show{display:flex;}
   .status .icon{font-size:3rem;line-height:1;}
   .status h2{margin:0;font-size:1.15rem;}
-  .status p{margin:0;color:var(--muted);font-size:.85rem;max-width:300px;line-height:1.55;}
+  .status p{margin:0;color:var(--muted);font-size:.85rem;max-width:300px;line-height:1.55;white-space:pre-line;}
   .spinner{
     width:38px;height:38px;border-radius:50%;
     border:3px solid var(--line);border-top-color:var(--brand);
@@ -178,9 +178,17 @@
 
 <script>
   // ════════════════════════════════════════════════════════════════════
-  //  CONFIG — ใส่ LIFF ID ของคุณที่นี่ (ได้จาก LINE Developers > LIFF)
+  //  CONFIG
   // ════════════════════════════════════════════════════════════════════
   var LIFF_ID = "2010232031-dcV9wMMe";
+
+  // n8n webhook that receives the registration. The request goes here
+  // DIRECTLY (fetch) instead of being typed into the chat, so "/submit ..."
+  // never appears in the conversation.
+  //   Production : https://<your-instance>.app.n8n.cloud/webhook/p1-register
+  //   Test       : https://<your-instance>.app.n8n.cloud/webhook-test/p1-register
+  //                (only works while the n8n editor canvas is open + "Listen")
+  var N8N_REGISTER_URL = "https://tbu-insights.app.n8n.cloud/webhook/p1-register";
   // ════════════════════════════════════════════════════════════════════
 
   var profile = null;
@@ -296,18 +304,23 @@
     $("submit").disabled = true;
     showStatus("", t("sending"), t("pleaseWait"), { spinner: true });
 
-    // sendMessages posts the text into the chat AS the user, so the bot's
-    // existing webhook flow (Access Router -> submit -> Push to Admins ->
-    // Reply) runs unchanged, with a valid replyToken.
-    liff.sendMessages([{ type: "text", text: text }])
-      .then(function () {
+    // POST straight to n8n instead of liff.sendMessages(). This keeps the
+    // "/submit ..." text OUT of the chat entirely. The n8n "Register Webhook"
+    // receives { userId, text }, hands it to the same Access Router → submit
+    // branch, and pushes the admin approval card. The user is notified via
+    // this overlay (and a LINE push from n8n), not by a chat reply.
+    fetch(N8N_REGISTER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: profile.userId, text: text })
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
         showStatus("✅", t("sentTitle"), t("sentMsg"), { closeBtn: true });
       })
       .catch(function (e) {
-        // sendMessages only works when LIFF is opened inside a chat with the
-        // chat_message.write scope. Fall back to telling the user to retry.
         showStatus("⚠️", t("failTitle"),
-          t("failMsg") + "\n(" + (e && e.message ? e.message : "sendMessages error") + ")",
+          t("failMsg") + "\n(" + (e && e.message ? e.message : "network error") + ")",
           { closeBtn: true });
         $("submit").disabled = false;
       });
